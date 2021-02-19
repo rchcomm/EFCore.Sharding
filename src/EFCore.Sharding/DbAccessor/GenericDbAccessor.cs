@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Dapper;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage;
 using System;
@@ -69,30 +70,29 @@ namespace EFCore.Sharding
             List<(string paramterName, object paramterValue)> paramters =
                 new List<(string paramterName, object paramterValue)>();
             var querySql = query.ToSql();
-            string theQSql = querySql.sql.Replace("\r\n", "\n").Replace("\n", " ");
+            var theSql = querySql.sql.Replace("\r\n", "\n").Replace("\n", " ");
+
+            //替换AS
+            var asPattern = "FROM (.*?) AS (.*?) ";
+            //倒排防止别名出错
+            var asMatchs = Regex.Matches(theSql, asPattern).Cast<Match>().Reverse();
+            foreach (Match aMatch in asMatchs)
+            {
+                var tableName = aMatch.Groups[1].ToString();
+                var asName = aMatch.Groups[2].ToString();
+
+                theSql = theSql.Replace(aMatch.Groups[0].ToString(), $"FROM {tableName} ");
+                theSql = theSql.Replace(asName + ".", tableName + ".");
+            }
+
             //无筛选
-            if (!theQSql.Contains("WHERE"))
+            if (!theSql.Contains("WHERE"))
                 return (" 1=1 ", paramters);
 
-            string pattern1 = "^SELECT.*?FROM.*? AS (.*?) WHERE .*?$";
-            string pattern2 = "^SELECT.*?FROM .*? (.*?) WHERE .*?$";
-            string asTmp = string.Empty;
-            if (Regex.IsMatch(theQSql, pattern1))
-            {
-                var match = Regex.Match(theQSql, pattern1);
-                asTmp = match.Groups[1]?.ToString();
-            }
-            else if (Regex.IsMatch(theQSql, pattern2))
-            {
-                var match = Regex.Match(theQSql, pattern2);
-                asTmp = match.Groups[1]?.ToString();
-            }
-            if (asTmp.IsNullOrEmpty())
-                throw new Exception("SQL解析失败!");
+            var firstIndex = theSql.IndexOf("WHERE") + 5;
+            string whereSql = theSql.Substring(firstIndex, theSql.Length - firstIndex);
 
-            string whereSql = querySql.sql.Split(new string[] { "WHERE" }, StringSplitOptions.None)[1].Replace($"{asTmp}.", "");
-
-            querySql.parameters.ForEach(aData =>
+            querySql.parameters?.ForEach(aData =>
             {
                 if (whereSql.Contains(aData.Key))
                     paramters.Add((aData.Key, aData.Value));
@@ -138,10 +138,21 @@ namespace EFCore.Sharding
 
             return (sql, whereSql.paramters);
         }
-        private List<DbParameter> CreateDbParamters(List<(string paramterName, object paramterValue)> paramters)
+        private DynamicParameters CreateDynamicParameters((string paramterName, object paramterValue)[] paramters)
+        {
+            DynamicParameters dynamicParameters = new DynamicParameters();
+
+            paramters?.ForEach(aParamter =>
+            {
+                dynamicParameters.Add(aParamter.paramterName, aParamter.paramterValue);
+            });
+
+            return dynamicParameters;
+        }
+        private List<DbParameter> CreateDbParamters((string paramterName, object paramterValue)[] paramters)
         {
             List<DbParameter> dbParamters = new List<DbParameter>();
-            paramters.ForEach(aParamter =>
+            paramters?.ForEach(aParamter =>
             {
                 var newParamter = _provider.GetDbParameter();
                 newParamter.ParameterName = aParamter.paramterName;
@@ -289,34 +300,45 @@ namespace EFCore.Sharding
         }
         public override async Task<DataTable> GetDataTableWithSqlAsync(string sql, params (string paramterName, object value)[] parameters)
         {
-            using DbConnection conn = _provider.GetDbConnection();
-            conn.ConnectionString = ConnectionString;
-            if (conn.State != ConnectionState.Open)
-            {
-                await conn.OpenAsync();
-            }
-
-            using DbCommand cmd = conn.CreateCommand();
-            cmd.Connection = conn;
-            cmd.CommandText = sql;
-            cmd.CommandTimeout = 5 * 60;
-            if (_openedTransaction)
-            {
-                cmd.Transaction = _transaction.GetDbTransaction();
-            }
-
-            if (parameters != null && parameters.Count() > 0)
-                cmd.Parameters.AddRange(CreateDbParamters(parameters.ToList()).ToArray());
-
-            using var reader = await cmd.ExecuteReaderAsync();
+            var conn = _db.Database.GetDbConnection();
+            using var reader = await conn.ExecuteReaderAsync(
+                sql, CreateDynamicParameters(parameters), _transaction?.GetDbTransaction(), _db.ShardingOption.CommandTimeout);
             DataTable table = new DataTable();
 
-            DataSet dataSet = new DataSet();
-            dataSet.Tables.Add(table);
-            dataSet.EnforceConstraints = false;
             table.Load(reader);
 
             return table;
+        }
+        public override async Task<DataSet> GetDataSetWithSqlAsync(string sql, params (string paramterName, object value)[] parameters)
+        {
+            DbProviderFactory dbProviderFactory = _provider.DbProviderFactory;
+            DbConnection conn = _db.Database.GetDbConnection();
+
+            if (conn.State != ConnectionState.Open)
+                await conn.OpenAsync();
+
+            using (DbCommand cmd = conn.CreateCommand())
+            {
+                cmd.Connection = conn;
+                cmd.CommandText = sql;
+                cmd.CommandTimeout = _db.ShardingOption.CommandTimeout;
+                if (parameters != null && parameters.Count() > 0)
+                    cmd.Parameters.AddRange(CreateDbParamters(parameters).ToArray());
+
+                DbDataAdapter adapter = dbProviderFactory.CreateDataAdapter();
+                adapter.SelectCommand = cmd;
+                DataSet ds = new DataSet();
+
+                adapter.Fill(ds);
+                cmd.Parameters.Clear();
+                return ds;
+            }
+        }
+        public override async Task<List<T>> GetListBySqlAsync<T>(string sql, params (string paramterName, object value)[] parameters)
+        {
+            var conn = _db.Database.GetDbConnection();
+
+            return (await conn.QueryAsync<T>(sql, CreateDynamicParameters(parameters), _transaction?.GetDbTransaction(), _db.ShardingOption.CommandTimeout)).ToList();
         }
 
         #endregion
@@ -325,12 +347,12 @@ namespace EFCore.Sharding
 
         public override async Task<int> ExecuteSqlAsync(string sql, params (string paramterName, object paramterValue)[] parameters)
         {
-#if EFCORE3
-            return await _db.Database.ExecuteSqlRawAsync(sql, CreateDbParamters(parameters.ToList()).ToArray());
+#if EFCORE3||EFCORE5
+            return await _db.Database.ExecuteSqlRawAsync(sql, CreateDbParamters(parameters).ToArray());
 #endif
 
 #if EFCORE2
-            return await _db.Database.ExecuteSqlCommandAsync(sql, CreateDbParamters(parameters.ToList()).ToArray());
+            return await _db.Database.ExecuteSqlCommandAsync(sql, CreateDbParamters(parameters).ToArray());
 #endif
         }
 

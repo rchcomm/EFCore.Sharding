@@ -1,13 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <Version>$(EFCore_Sharding)</Version>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Version>$(EFCORE3)</Version>
     <LangVersion>8.0</LangVersion>
-  </PropertyGroup>
-  
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EFCore.Sharding\EFCore.Sharding.csproj" />
+    <ProjectReference Include="..\EFCore.Sharding.3x\EFCore.Sharding.3x.csproj" />
   </ItemGroup>
 
 </Project>

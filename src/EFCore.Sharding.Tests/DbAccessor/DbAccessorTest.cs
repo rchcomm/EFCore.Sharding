@@ -175,9 +175,16 @@ namespace EFCore.Sharding.Tests
         public async Task Delete_SqlAsync_generic()
         {
             _db.Insert(_insertList);
-            await _db.DeleteSqlAsync<Base_UnitTest>(x => x.UserId == "Admin2");
+            string userId = "Admin1";
+
+            await _db.DeleteSqlAsync<Base_UnitTest>(x => x.UserId == userId);
             var count = _db.GetIQueryable<Base_UnitTest>().Count();
             Assert.AreEqual(1, count);
+
+            var deleteIds = new string[] { "Admin2" };
+            await _db.DeleteSqlAsync<Base_UnitTest>(x => deleteIds.Contains(x.UserId));
+            count = _db.GetIQueryable<Base_UnitTest>().Count();
+            Assert.AreEqual(0, count);
         }
 
         [TestMethod]
@@ -328,7 +335,8 @@ namespace EFCore.Sharding.Tests
         public void UpdateSql()
         {
             _db.Insert(_newData);
-            _db.UpdateSql<Base_UnitTest>(x => x.UserId == "Admin", ("UserId", UpdateType.Equal, "Admin2"));
+            var userIds = new string[] { "Admin" };
+            _db.UpdateSql<Base_UnitTest>(x => userIds.Contains(x.UserId), ("UserId", UpdateType.Equal, "Admin2"));
 
             Assert.IsTrue(_db.GetIQueryable<Base_UnitTest>().Any(x => x.UserId == "Admin2"));
         }

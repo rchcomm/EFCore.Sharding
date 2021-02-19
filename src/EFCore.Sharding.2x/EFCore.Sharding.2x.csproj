@@ -2,9 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <Version>$(EFCore_Sharding_2x)</Version>
-    <LangVersion>8.0</LangVersion>
+    <Version>$(EFCORE2)</Version>
     <DefineConstants>TRACE;DEBUG;EFCORE2</DefineConstants>
+    <AssemblyName>EFCore.Sharding</AssemblyName>
+    <RootNamespace>EFCore.Sharding</RootNamespace>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
@@ -19,6 +20,7 @@
   
   <ItemGroup>
     <PackageReference Include="Castle.Core" Version="4.4.1" />
+    <PackageReference Include="Dapper" Version="2.0.78" />
     <PackageReference Include="Dynamitey" Version="2.0.10.189" />
     <PackageReference Include="IdHelper" Version="1.4.1" />
     <PackageReference Include="JetBrains.Annotations" Version="2020.1.0" />

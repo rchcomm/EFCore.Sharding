@@ -89,7 +89,7 @@ namespace EFCore.Sharding
 
                 if (!string.IsNullOrEmpty(Paramter.Suffix))
                 {
-                    entity.ToTable($"{AnnotationHelper.GetDbTableName(aEntity)}_{Paramter.Suffix}");
+                    entity.ToTable($"{AnnotationHelper.GetDbTableName(aEntity)}_{Paramter.Suffix}", AnnotationHelper.GetDbSchemaName(aEntity));
                 }
             });
 
@@ -126,7 +126,7 @@ namespace EFCore.Sharding
                 }
             }
 
-#if EFCORE3
+#if !EFCORE2
             //字段注释,需要开启程序集XML文档
             if (ShardingOption.EnableComments)
             {
